@@ -130,14 +130,21 @@ def generate_new_hardware_dict(array):
     drives = list(array.get_drives().items)
     for drive in drives:
         drive_name = drive.name
-        hw_info["drives"][drive_name] = {
-            "capacity": drive.capacity,
-            "capacity_installed": getattr(drive, "capacity_installed", drive.capacity),
-            "status": drive.status,
-            "protocol": getattr(drive, "protocol", None),
-            "details": getattr(drive, "details", None),
-            "type": drive.type,
-        }
+        drive_info = hw_info["drives"].setdefault(
+            drive_name, {"identify_enabled": None, "serial": None}
+        )
+        drive_info.update(
+            {
+                "capacity": drive.capacity,
+                "capacity_installed": getattr(
+                    drive, "capacity_installed", drive.capacity
+                ),
+                "status": drive.status,
+                "protocol": getattr(drive, "protocol", None),
+                "details": getattr(drive, "details", None),
+                "type": drive.type,
+            }
+        )
     api_version = array.get_rest_version()
     if LooseVersion(SFP_API_VERSION) <= LooseVersion(api_version):
         port_details = list(array.get_network_interfaces_port_details().items)
