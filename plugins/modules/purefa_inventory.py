@@ -118,6 +118,7 @@ def generate_new_hardware_dict(array):
                 "tx_fault": None,
                 "tx_power": None,
                 "voltage": None,
+                "slot": getattr(component, "slot", None),
             }
         if component.type == "power_supply":
             hw_info["power"][component_name] = {
