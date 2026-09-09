@@ -89,7 +89,7 @@ def generate_new_hardware_dict(array):
                 "status": component.status,
             }
         if component.type == "temp_sensor":
-            hw_info["controllers"][component_name] = {
+            hw_info["temperature"][component_name] = {
                 "status": component.status,
                 "temperature": component.temperature,
             }
