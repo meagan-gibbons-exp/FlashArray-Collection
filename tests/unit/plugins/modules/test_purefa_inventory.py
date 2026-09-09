@@ -193,7 +193,39 @@ class TestGenerateHardwareDict:
         assert "CT0.TMP0" in result["temperature"]
         assert result["temperature"]["CT0.TMP0"]["status"] == "ok"
         assert result["temperature"]["CT0.TMP0"]["temperature"] == 45
-        assert "CT0.TMP0" not in result["controllers"]
+        # Still reported in controllers as well - deprecated, but removing it
+        # would be a breaking change to the returned inventory
+        assert result["controllers"]["CT0.TMP0"]["status"] == "ok"
+        assert result["controllers"]["CT0.TMP0"]["temperature"] == 45
+
+    @patch("plugins.modules.purefa_inventory.LooseVersion")
+    def test_temp_sensor_dicts_are_independent(self, mock_lv):
+        """Test the duplicated sensor entries are not the same object"""
+        mock_array = Mock()
+
+        mock_array.get_rest_version.return_value = "2.10"
+        mock_lv.side_effect = float
+
+        mock_temp = Mock()
+        mock_temp.name = "CT0.TMP0"
+        mock_temp.type = "temp_sensor"
+        mock_temp.status = "ok"
+        mock_temp.temperature = 45
+
+        mock_hardware_response = Mock()
+        mock_hardware_response.items = [mock_temp]
+        mock_array.get_hardware.return_value = mock_hardware_response
+
+        mock_drives_response = Mock()
+        mock_drives_response.items = []
+        mock_array.get_drives.return_value = mock_drives_response
+
+        result = generate_new_hardware_dict(mock_array)
+
+        assert (
+            result["temperature"]["CT0.TMP0"] is not result["controllers"]["CT0.TMP0"]
+        )
+        assert result["temperature"]["CT0.TMP0"] == result["controllers"]["CT0.TMP0"]
 
     @patch("plugins.modules.purefa_inventory.LooseVersion")
     def test_generates_drive_bay_dict(self, mock_lv):

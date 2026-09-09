@@ -89,10 +89,16 @@ def generate_new_hardware_dict(array):
                 "status": component.status,
             }
         if component.type == "temp_sensor":
-            hw_info["temperature"][component_name] = {
+            sensor = {
                 "status": component.status,
                 "temperature": component.temperature,
             }
+            hw_info["temperature"][component_name] = sensor
+            # Temperature sensors are also reported in ``controllers``, where
+            # they have always been, so that this remains a backwards
+            # compatible addition. Deprecated - to be removed from
+            # ``controllers`` in the next major release.
+            hw_info["controllers"][component_name] = dict(sensor)
         if component.type in [
             "drive_bay",
             "nvram_bay",
