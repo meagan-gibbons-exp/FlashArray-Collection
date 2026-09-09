@@ -93,7 +93,10 @@ def generate_new_hardware_dict(array):
                 "status": component.status,
                 "temperature": component.temperature,
             }
-        if component.type == "drive_bay":
+        if component.type in [
+            "drive_bay",
+            "nvram_bay"
+        ]:
             hw_info["drives"][component_name] = {
                 "status": component.status,
                 "identify_enabled": component.identify_enabled,
