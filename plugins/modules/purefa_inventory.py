@@ -89,11 +89,20 @@ def generate_new_hardware_dict(array):
                 "status": component.status,
             }
         if component.type == "temp_sensor":
-            hw_info["controllers"][component_name] = {
+            sensor = {
                 "status": component.status,
                 "temperature": component.temperature,
             }
-        if component.type == "drive_bay":
+            hw_info["temperature"][component_name] = sensor
+            # Temperature sensors are also reported in ``controllers``, where
+            # they have always been, so that this remains a backwards
+            # compatible addition. Deprecated - to be removed from
+            # ``controllers`` in the next major release.
+            hw_info["controllers"][component_name] = dict(sensor)
+        if component.type in [
+            "drive_bay",
+            "nvram_bay",
+        ]:
             hw_info["drives"][component_name] = {
                 "status": component.status,
                 "identify_enabled": component.identify_enabled,
@@ -118,6 +127,7 @@ def generate_new_hardware_dict(array):
                 "tx_fault": None,
                 "tx_power": None,
                 "voltage": None,
+                "slot": getattr(component, "slot", None),
             }
         if component.type == "power_supply":
             hw_info["power"][component_name] = {
@@ -129,14 +139,21 @@ def generate_new_hardware_dict(array):
     drives = list(array.get_drives().items)
     for drive in drives:
         drive_name = drive.name
-        hw_info["drives"][drive_name] = {
-            "capacity": drive.capacity,
-            "capacity_installed": getattr(drive, "capacity_installed", drive.capacity),
-            "status": drive.status,
-            "protocol": getattr(drive, "protocol", None),
-            "details": getattr(drive, "details", None),
-            "type": drive.type,
-        }
+        drive_info = hw_info["drives"].setdefault(
+            drive_name, {"identify_enabled": None, "serial": None}
+        )
+        drive_info.update(
+            {
+                "capacity": drive.capacity,
+                "capacity_installed": getattr(
+                    drive, "capacity_installed", drive.capacity
+                ),
+                "status": drive.status,
+                "protocol": getattr(drive, "protocol", None),
+                "details": getattr(drive, "details", None),
+                "type": drive.type,
+            }
+        )
     api_version = array.get_rest_version()
     if LooseVersion(SFP_API_VERSION) <= LooseVersion(api_version):
         port_details = list(array.get_network_interfaces_port_details().items)
