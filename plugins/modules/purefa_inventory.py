@@ -95,7 +95,7 @@ def generate_new_hardware_dict(array):
             }
         if component.type in [
             "drive_bay",
-            "nvram_bay"
+            "nvram_bay",
         ]:
             hw_info["drives"][component_name] = {
                 "status": component.status,
