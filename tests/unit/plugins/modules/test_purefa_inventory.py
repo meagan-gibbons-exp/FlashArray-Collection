@@ -189,10 +189,11 @@ class TestGenerateHardwareDict:
 
         result = generate_new_hardware_dict(mock_array)
 
-        assert "controllers" in result
-        assert "CT0.TMP0" in result["controllers"]
-        assert result["controllers"]["CT0.TMP0"]["status"] == "ok"
-        assert result["controllers"]["CT0.TMP0"]["temperature"] == 45
+        assert "temperature" in result
+        assert "CT0.TMP0" in result["temperature"]
+        assert result["temperature"]["CT0.TMP0"]["status"] == "ok"
+        assert result["temperature"]["CT0.TMP0"]["temperature"] == 45
+        assert "CT0.TMP0" not in result["controllers"]
 
     @patch("plugins.modules.purefa_inventory.LooseVersion")
     def test_generates_drive_bay_dict(self, mock_lv):
@@ -225,6 +226,119 @@ class TestGenerateHardwareDict:
         assert result["drives"]["SH0.BAY0"]["serial"] == "BAY001"
 
     @patch("plugins.modules.purefa_inventory.LooseVersion")
+    def test_drive_serial_survives_drives_pass(self, mock_lv):
+        """Test drive_bay serial is merged with, not overwritten by, get_drives"""
+        mock_array = Mock()
+
+        mock_array.get_rest_version.return_value = "2.10"
+        mock_lv.side_effect = float
+
+        mock_bay = Mock()
+        mock_bay.name = "CH0.BAY0"
+        mock_bay.type = "drive_bay"
+        mock_bay.status = "ok"
+        mock_bay.identify_enabled = False
+        mock_bay.serial = "PFMUH2348229B"
+
+        mock_hardware_response = Mock()
+        mock_hardware_response.items = [mock_bay]
+        mock_array.get_hardware.return_value = mock_hardware_response
+
+        # Same name as the drive_bay component above - both passes touch this entry
+        mock_drive = Mock()
+        mock_drive.name = "CH0.BAY0"
+        mock_drive.capacity = 2250000000000
+        mock_drive.capacity_installed = 2250000000000
+        mock_drive.status = "healthy"
+        mock_drive.protocol = "NVMe"
+        mock_drive.details = None
+        mock_drive.type = "SSD"
+
+        mock_drives_response = Mock()
+        mock_drives_response.items = [mock_drive]
+        mock_array.get_drives.return_value = mock_drives_response
+
+        result = generate_new_hardware_dict(mock_array)
+
+        # From the drive_bay pass
+        assert result["drives"]["CH0.BAY0"]["serial"] == "PFMUH2348229B"
+        assert result["drives"]["CH0.BAY0"]["identify_enabled"] is False
+        # From the get_drives pass
+        assert result["drives"]["CH0.BAY0"]["capacity"] == 2250000000000
+        assert result["drives"]["CH0.BAY0"]["type"] == "SSD"
+        assert result["drives"]["CH0.BAY0"]["status"] == "healthy"
+
+    @patch("plugins.modules.purefa_inventory.LooseVersion")
+    def test_generates_nvram_bay_dict(self, mock_lv):
+        """Test generating hardware dict with nvram_bay components"""
+        mock_array = Mock()
+
+        mock_array.get_rest_version.return_value = "2.10"
+        mock_lv.side_effect = float
+
+        mock_nvram_bay = Mock()
+        mock_nvram_bay.name = "CH0.NVB0"
+        mock_nvram_bay.type = "nvram_bay"
+        mock_nvram_bay.status = "ok"
+        mock_nvram_bay.identify_enabled = False
+        mock_nvram_bay.serial = None
+
+        mock_hardware_response = Mock()
+        mock_hardware_response.items = [mock_nvram_bay]
+        mock_array.get_hardware.return_value = mock_hardware_response
+
+        mock_drive = Mock()
+        mock_drive.name = "CH0.NVB0"
+        mock_drive.capacity = 7516192768
+        mock_drive.capacity_installed = 7516192768
+        mock_drive.status = "healthy"
+        mock_drive.protocol = "NVMe"
+        mock_drive.details = None
+        mock_drive.type = "NVRAM"
+
+        mock_drives_response = Mock()
+        mock_drives_response.items = [mock_drive]
+        mock_array.get_drives.return_value = mock_drives_response
+
+        result = generate_new_hardware_dict(mock_array)
+
+        assert "CH0.NVB0" in result["drives"]
+        assert result["drives"]["CH0.NVB0"]["identify_enabled"] is False
+        assert result["drives"]["CH0.NVB0"]["serial"] is None
+        assert result["drives"]["CH0.NVB0"]["type"] == "NVRAM"
+
+    @patch("plugins.modules.purefa_inventory.LooseVersion")
+    def test_drive_without_hardware_component(self, mock_lv):
+        """Test a drive with no matching bay component still has serial keys"""
+        mock_array = Mock()
+
+        mock_array.get_rest_version.return_value = "2.10"
+        mock_lv.side_effect = float
+
+        mock_hardware_response = Mock()
+        mock_hardware_response.items = []
+        mock_array.get_hardware.return_value = mock_hardware_response
+
+        mock_drive = Mock()
+        mock_drive.name = "CH9.BAY9"
+        mock_drive.capacity = 0
+        mock_drive.capacity_installed = 0
+        mock_drive.status = "unused"
+        mock_drive.protocol = None
+        mock_drive.details = None
+        mock_drive.type = "-"
+
+        mock_drives_response = Mock()
+        mock_drives_response.items = [mock_drive]
+        mock_array.get_drives.return_value = mock_drives_response
+
+        result = generate_new_hardware_dict(mock_array)
+
+        assert result["drives"]["CH9.BAY9"]["serial"] is None
+        assert result["drives"]["CH9.BAY9"]["identify_enabled"] is None
+        assert result["drives"]["CH9.BAY9"]["capacity"] == 0
+
+    @patch("plugins.modules.purefa_inventory.LooseVersion")
     def test_generates_network_interfaces_dict(self, mock_lv):
         """Test generating hardware dict with various network port types"""
         mock_array = Mock()
@@ -237,12 +351,14 @@ class TestGenerateHardwareDict:
         mock_fc_port.type = "fc_port"
         mock_fc_port.status = "ok"
         mock_fc_port.speed = 32000000000
+        mock_fc_port.slot = 3
 
         mock_eth_port = Mock()
         mock_eth_port.name = "CT0.ETH0"
         mock_eth_port.type = "eth_port"
         mock_eth_port.status = "ok"
         mock_eth_port.speed = 10000000000
+        mock_eth_port.slot = None
 
         mock_hardware_response = Mock()
         mock_hardware_response.items = [mock_fc_port, mock_eth_port]
@@ -259,6 +375,53 @@ class TestGenerateHardwareDict:
         assert result["interfaces"]["CT0.FC0"]["type"] == "fc_port"
         assert "CT0.ETH0" in result["interfaces"]
         assert result["interfaces"]["CT0.ETH0"]["type"] == "eth_port"
+
+    @patch("plugins.modules.purefa_inventory.LooseVersion")
+    def test_reports_interface_slot(self, mock_lv):
+        """Test slot is reported for PCIe-hosted ports and null for onboard ones"""
+        mock_array = Mock()
+
+        mock_array.get_rest_version.return_value = "2.10"
+        mock_lv.side_effect = float
+
+        mock_onboard_eth = Mock()
+        mock_onboard_eth.name = "CT0.ETH0"
+        mock_onboard_eth.type = "eth_port"
+        mock_onboard_eth.status = "ok"
+        mock_onboard_eth.speed = 0
+        mock_onboard_eth.slot = None
+
+        mock_card_eth = Mock()
+        mock_card_eth.name = "CT0.ETH8"
+        mock_card_eth.type = "eth_port"
+        mock_card_eth.status = "ok"
+        mock_card_eth.speed = 25000000000
+        mock_card_eth.slot = 1
+
+        mock_fc_port = Mock()
+        mock_fc_port.name = "CT0.FC0"
+        mock_fc_port.type = "fc_port"
+        mock_fc_port.status = "ok"
+        mock_fc_port.speed = 32000000000
+        mock_fc_port.slot = 3
+
+        mock_hardware_response = Mock()
+        mock_hardware_response.items = [
+            mock_onboard_eth,
+            mock_card_eth,
+            mock_fc_port,
+        ]
+        mock_array.get_hardware.return_value = mock_hardware_response
+
+        mock_drives_response = Mock()
+        mock_drives_response.items = []
+        mock_array.get_drives.return_value = mock_drives_response
+
+        result = generate_new_hardware_dict(mock_array)
+
+        assert result["interfaces"]["CT0.ETH8"]["slot"] == 1
+        assert result["interfaces"]["CT0.FC0"]["slot"] == 3
+        assert result["interfaces"]["CT0.ETH0"]["slot"] is None
 
     @patch("plugins.modules.purefa_inventory.LooseVersion")
     def test_generates_power_supply_dict(self, mock_lv):
@@ -307,6 +470,7 @@ class TestGenerateHardwareDict:
         mock_fc_port.type = "fc_port"
         mock_fc_port.status = "ok"
         mock_fc_port.speed = 32000000000
+        mock_fc_port.slot = 3
 
         mock_hardware_response = Mock()
         mock_hardware_response.items = [mock_fc_port]
