@@ -560,3 +560,215 @@ class TestGenerateHardwareDict:
         assert result["interfaces"]["CT0.FC0"]["tx_fault"] is False
         assert result["interfaces"]["CT0.FC0"]["tx_power"] == -2.5
         assert result["interfaces"]["CT0.FC0"]["voltage"] == 3.3
+
+
+class FakeComponent:
+    """Stand-in for the SDK's Hardware model.
+
+    py-pure-client models raise AttributeError for any field the array
+    returned as null rather than returning None. Mock objects do not, so a
+    bare attribute access on a field a component leaves unpopulated looks
+    fine under Mock and crashes against a real array.
+    """
+
+    def __init__(self, **fields):
+        self._fields = fields
+
+    def __getattr__(self, name):
+        value = self._fields.get(name)
+        if value is None:
+            raise AttributeError(name)
+        return value
+
+
+class TestOtherHardware:
+    """Tests for the other dict - issue #1058"""
+
+    @patch("plugins.modules.purefa_inventory.LooseVersion")
+    def test_reports_direct_compress_accelerator(self, mock_lv):
+        """Test a DCA is reported in other rather than dropped"""
+        mock_array = Mock()
+
+        mock_array.get_rest_version.return_value = "2.54"
+        mock_lv.side_effect = float
+
+        # Exactly the payload from issue #1058 - a DCA populates only index,
+        # slot, status and type; every other field comes back null
+        mock_dca = FakeComponent(
+            name="CT0.DCA4",
+            type="direct_compress_accelerator",
+            status="ok",
+            slot=4,
+            index=4,
+            details=None,
+            identify_enabled=None,
+            model=None,
+            serial=None,
+            speed=None,
+            temperature=None,
+            voltage=None,
+        )
+
+        mock_hardware_response = Mock()
+        mock_hardware_response.items = [mock_dca]
+        mock_array.get_hardware.return_value = mock_hardware_response
+
+        mock_drives_response = Mock()
+        mock_drives_response.items = []
+        mock_array.get_drives.return_value = mock_drives_response
+
+        # 2.54 is past SFP_API_VERSION, so the port details pass runs
+        mock_array.get_network_interfaces_port_details.return_value = Mock(items=[])
+
+        result = generate_new_hardware_dict(mock_array)
+
+        assert "CT0.DCA4" in result["other"]
+        dca = result["other"]["CT0.DCA4"]
+        assert dca["type"] == "direct_compress_accelerator"
+        assert dca["status"] == "ok"
+        assert dca["slot"] == 4
+        assert dca["index"] == 4
+        assert dca["serial"] is None
+        assert dca["identify_enabled"] is None
+        assert dca["model"] is None
+        # and it must not have leaked into any of the other dicts
+        assert result["interfaces"] == {}
+        assert result["controllers"] == {}
+        assert result["drives"] == {}
+
+    @patch("plugins.modules.purefa_inventory.LooseVersion")
+    def test_reports_unknown_component_type(self, mock_lv):
+        """Test a component type the module has never seen is still reported"""
+        mock_array = Mock()
+
+        mock_array.get_rest_version.return_value = "2.54"
+        mock_lv.side_effect = float
+
+        mock_widget = FakeComponent(
+            name="CT0.WIDGET0",
+            type="some_future_component",
+            status="healthy",
+            index=0,
+        )
+
+        mock_hardware_response = Mock()
+        mock_hardware_response.items = [mock_widget]
+        mock_array.get_hardware.return_value = mock_hardware_response
+
+        mock_drives_response = Mock()
+        mock_drives_response.items = []
+        mock_array.get_drives.return_value = mock_drives_response
+
+        # 2.54 is past SFP_API_VERSION, so the port details pass runs
+        mock_array.get_network_interfaces_port_details.return_value = Mock(items=[])
+
+        result = generate_new_hardware_dict(mock_array)
+
+        assert result["other"]["CT0.WIDGET0"]["type"] == "some_future_component"
+        assert result["other"]["CT0.WIDGET0"]["status"] == "healthy"
+        assert result["other"]["CT0.WIDGET0"]["voltage"] is None
+
+    @patch("plugins.modules.purefa_inventory.LooseVersion")
+    def test_known_component_types_stay_out_of_other(self, mock_lv):
+        """Test components with a dedicated dict are not also put in other"""
+        mock_array = Mock()
+
+        mock_array.get_rest_version.return_value = "2.54"
+        mock_lv.side_effect = float
+
+        known = [
+            FakeComponent(
+                name="CH0",
+                type="chassis",
+                status="ok",
+                serial="PCHFS12",
+                model="FA-X20R3",
+                identify_enabled=False,
+            ),
+            FakeComponent(
+                name="CT0",
+                type="controller",
+                status="ok",
+                serial="PCTFS34",
+                model="FA-X20R3",
+                identify_enabled=False,
+            ),
+            FakeComponent(name="CT0.FAN0", type="cooling", status="ok"),
+            FakeComponent(
+                name="CT0.TMP0", type="temp_sensor", status="ok", temperature=45
+            ),
+            FakeComponent(
+                name="CH0.BAY0",
+                type="drive_bay",
+                status="ok",
+                identify_enabled=False,
+                serial="BAY001",
+            ),
+            FakeComponent(
+                name="CH0.NVB0",
+                type="nvram_bay",
+                status="ok",
+                identify_enabled=False,
+            ),
+            FakeComponent(
+                name="CT0.ETH0", type="eth_port", status="ok", speed=10000000000
+            ),
+            FakeComponent(
+                name="CT0.FC0", type="fc_port", status="ok", speed=32000000000, slot=3
+            ),
+            FakeComponent(
+                name="CT0.PWR0",
+                type="power_supply",
+                status="ok",
+                voltage=12,
+                serial="PWR001",
+                model="DS1600",
+            ),
+        ]
+
+        mock_hardware_response = Mock()
+        mock_hardware_response.items = known
+        mock_array.get_hardware.return_value = mock_hardware_response
+
+        mock_drives_response = Mock()
+        mock_drives_response.items = []
+        mock_array.get_drives.return_value = mock_drives_response
+
+        # 2.54 is past SFP_API_VERSION, so the port details pass runs
+        mock_array.get_network_interfaces_port_details.return_value = Mock(items=[])
+
+        result = generate_new_hardware_dict(mock_array)
+
+        assert result["other"] == {}
+        # spot check the components still landed where they belong
+        assert "CH0" in result["chassis"]
+        assert "CT0" in result["controllers"]
+        assert "CT0.FAN0" in result["fans"]
+        assert "CT0.TMP0" in result["temperature"]
+        assert "CH0.BAY0" in result["drives"]
+        assert "CH0.NVB0" in result["drives"]
+        assert "CT0.ETH0" in result["interfaces"]
+        assert "CT0.PWR0" in result["power"]
+
+    @patch("plugins.modules.purefa_inventory.LooseVersion")
+    def test_other_is_always_present(self, mock_lv):
+        """Test other exists even on an array reporting no such components"""
+        mock_array = Mock()
+
+        mock_array.get_rest_version.return_value = "2.54"
+        mock_lv.side_effect = float
+
+        mock_hardware_response = Mock()
+        mock_hardware_response.items = []
+        mock_array.get_hardware.return_value = mock_hardware_response
+
+        mock_drives_response = Mock()
+        mock_drives_response.items = []
+        mock_array.get_drives.return_value = mock_drives_response
+
+        # 2.54 is past SFP_API_VERSION, so the port details pass runs
+        mock_array.get_network_interfaces_port_details.return_value = Mock(items=[])
+
+        result = generate_new_hardware_dict(mock_array)
+
+        assert result["other"] == {}

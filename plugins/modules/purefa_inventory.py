@@ -21,6 +21,12 @@ short_description: Collect information from Everpure FlashArray
 version_added: '1.0.0'
 description:
   - Collect hardware inventory information from a Everpure Flasharray
+  - Hardware components that do not have a dedicated dict of their own are
+    reported in the C(other) dict, keyed by component name, with the component
+    type in the C(type) key.
+  - The contents of C(other) are not stable. A component reported there may be
+    moved into a dedicated dict in a future release, so match on the C(type)
+    key rather than assuming a component stays in C(other).
 author:
   - Everpure ansible Team (@sdodsley) <pure-ansible-team@everpuredata.com>
 extends_documentation_fragment:
@@ -66,6 +72,7 @@ def generate_new_hardware_dict(array):
         "power": {},
         "chassis": {},
         "temperature": {},
+        "other": {},
     }
     components = list(array.get_hardware().items)
     for component in components:
@@ -77,18 +84,18 @@ def generate_new_hardware_dict(array):
                 "model": component.model,
                 "identify_enabled": component.identify_enabled,
             }
-        if component.type == "controller":
+        elif component.type == "controller":
             hw_info["controllers"][component_name] = {
                 "status": component.status,
                 "serial": component.serial,
                 "model": component.model,
                 "identify_enabled": component.identify_enabled,
             }
-        if component.type == "cooling":
+        elif component.type == "cooling":
             hw_info["fans"][component_name] = {
                 "status": component.status,
             }
-        if component.type == "temp_sensor":
+        elif component.type == "temp_sensor":
             sensor = {
                 "status": component.status,
                 "temperature": component.temperature,
@@ -99,7 +106,7 @@ def generate_new_hardware_dict(array):
             # compatible addition. Deprecated - to be removed from
             # ``controllers`` in the next major release.
             hw_info["controllers"][component_name] = dict(sensor)
-        if component.type in [
+        elif component.type in [
             "drive_bay",
             "nvram_bay",
         ]:
@@ -108,7 +115,7 @@ def generate_new_hardware_dict(array):
                 "identify_enabled": component.identify_enabled,
                 "serial": getattr(component, "serial", None),
             }
-        if component.type in [
+        elif component.type in [
             "sas_port",
             "fc_port",
             "eth_port",
@@ -129,12 +136,33 @@ def generate_new_hardware_dict(array):
                 "voltage": None,
                 "slot": getattr(component, "slot", None),
             }
-        if component.type == "power_supply":
+        elif component.type == "power_supply":
             hw_info["power"][component_name] = {
                 "status": component.status,
                 "voltage": getattr(component, "voltage", None),
                 "serial": getattr(component, "serial", None),
                 "model": getattr(component, "model", None),
+            }
+        else:
+            # Any component type without a dedicated dict of its own, so that
+            # hardware the array reports is not silently dropped - see #1058.
+            # Which fields a given component populates is not known in
+            # advance, and the SDK models raise AttributeError rather than
+            # returning None for the ones it does not, so every field here is
+            # read with a default. A direct_compress_accelerator, for example,
+            # populates only status, slot and index.
+            hw_info["other"][component_name] = {
+                "type": component.type,
+                "status": getattr(component, "status", None),
+                "slot": getattr(component, "slot", None),
+                "index": getattr(component, "index", None),
+                "model": getattr(component, "model", None),
+                "serial": getattr(component, "serial", None),
+                "identify_enabled": getattr(component, "identify_enabled", None),
+                "speed": getattr(component, "speed", None),
+                "temperature": getattr(component, "temperature", None),
+                "voltage": getattr(component, "voltage", None),
+                "details": getattr(component, "details", None),
             }
     drives = list(array.get_drives().items)
     for drive in drives:
